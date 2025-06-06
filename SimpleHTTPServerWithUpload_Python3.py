@@ -77,57 +77,43 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not content_type.startswith('multipart/form-data'):
                 return (False, "Content-Type is not multipart/form-data")
             
-            # Parse the boundary
-            boundary = content_type.split("boundary=")[1].encode('utf-8')
-            content_length = int(self.headers.get('content-length', 0))
+            # Use cgi.FieldStorage to parse multipart data
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    'REQUEST_METHOD': 'POST',
+                    'CONTENT_TYPE': self.headers['content-type'],
+                }
+            )
             
-            if content_length <= 0:
-                return (False, "No data received")
+            # Look for file field
+            if 'file' not in form:
+                return (False, "No file field found in form data")
             
-            # Read the entire POST data
-            post_data = self.rfile.read(content_length)
+            fileitem = form['file']
             
-            # Split by boundary
-            parts = post_data.split(b'--' + boundary)
+            # Check if file was uploaded
+            if not fileitem.filename:
+                return (False, "No file selected")
             
-            for part in parts:
-                if b'Content-Disposition' in part and b'filename=' in part:
-                    # Extract filename
-                    lines = part.split(b'\r\n')
-                    filename = None
-                    content_start = 0
-                    
-                    for i, line in enumerate(lines):
-                        if b'Content-Disposition' in line:
-                            # Extract filename using regex
-                            match = re.search(rb'filename="([^"]*)"', line)
-                            if match:
-                                filename = match.group(1).decode('utf-8')
-                        elif line == b'':
-                            content_start = i + 1
-                            break
-                    
-                    if filename and content_start < len(lines):
-                        # Get file content (excluding the last \r\n--)
-                        file_content = b'\r\n'.join(lines[content_start:])
-                        if file_content.endswith(b'\r\n'):
-                            file_content = file_content[:-2]
-                        
-                        # Save file
-                        path = self.translate_path(self.path)
-                        if not os.path.isdir(path):
-                            path = os.path.dirname(path)
-                        
-                        filepath = os.path.join(path, filename)
-                        
-                        try:
-                            with open(filepath, 'wb') as f:
-                                f.write(file_content)
-                            return (True, f"File '{filename}' uploaded successfully!")
-                        except IOError as e:
-                            return (False, f"Can't save file: {str(e)}")
+            # Get the filename and file content
+            filename = fileitem.filename
+            file_content = fileitem.file.read()
             
-            return (False, "No file found in upload data")
+            # Save file
+            path = self.translate_path(self.path)
+            if not os.path.isdir(path):
+                path = os.path.dirname(path)
+            
+            filepath = os.path.join(path, filename)
+            
+            try:
+                with open(filepath, 'wb') as f:
+                    f.write(file_content)
+                return (True, f"File '{filename}' uploaded successfully!")
+            except IOError as e:
+                return (False, f"Can't save file: {str(e)}")
             
         except Exception as e:
             return (False, f"Error processing upload: {str(e)}")
